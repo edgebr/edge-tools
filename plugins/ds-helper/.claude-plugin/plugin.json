@@ -1,0 +1,9 @@
+{
+  "name": "ds-helper",
+  "description": "Design-system-bound design & development in Figma, via Claude Code: create designs (design-builder), scaffold bound code from a design (figma-to-code), and verify code against the design (figma-fidelity). Design-system-agnostic via profiles — ships a Dell (DDS v3) profile.",
+  "version": "0.1.0",
+  "author": {
+    "name": "EDGE"
+  },
+  "keywords": ["figma", "design-system", "design-tokens", "code-connect", "edge"]
+}

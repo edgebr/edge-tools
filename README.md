@@ -12,7 +12,7 @@ you want.
 
 | Plugin | What it does | Install |
 |---|---|---|
-| [`ds-helper`](plugins/ds-helper) | Design-system-bound design & development in Figma: build a screen (`design-builder`), turn a design into bound code (`figma-to-code`), verify code vs design (`figma-fidelity`). Design-system-agnostic via **profiles** — ships a Dell (DDS v3) profile. | `/plugin install ds-helper@edge-tools` |
+| [`ds-helper`](plugins/ds-helper) | Design-system-bound design & development, integrated with Figma: build a screen (`design-builder`), turn a design into bound code (`figma-to-code`), verify code vs design (`figma-fidelity`). Design-system-agnostic via **profiles** — ships a Dell (DDS v3) profile. | `/plugin install ds-helper@edge-tools` |
 
 > More plugins will live here alongside `ds-helper`, each installable independently.
 

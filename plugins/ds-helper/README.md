@@ -1,4 +1,4 @@
-# ds-helper — design-system-bound design & development in Figma, via Claude Code
+# ds-helper — design-system-bound design & development, integrated with Figma, via Claude Code
 
 `ds-helper` keeps UI work **bound to a design system** from design to code to review. It bundles
 three skills, one per phase of a UI feature — plus a helper to wire them into Tour:

@@ -8,7 +8,7 @@
     {
       "name": "ds-helper",
       "source": "./plugins/ds-helper",
-      "description": "Design-system-bound design & development in Figma: build a screen (design-builder), turn a design into bound code (figma-to-code), and verify code against the design (figma-fidelity). Ships a Dell profile; works for any design system via profiles."
+      "description": "Design-system-bound design & development, integrated with Figma: build a screen (design-builder), turn a design into bound code (figma-to-code), and verify code against the design (figma-fidelity). Ships a Dell profile; works for any design system via profiles."
     }
   ]
 }

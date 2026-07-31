@@ -1,0 +1,31 @@
+{
+  "id": "dell",
+  "displayName": "Dell Design System v3",
+  "shortName": "DDS V3",
+  "tokenPrefix": "--dds-",
+  "namingConvention": "--dds-{category}-{type}-{variant}--{state}",
+  "spacingScale": {
+    "base": 4,
+    "steps": { "xs": 4, "sm": 8, "md": 12, "lg": 16, "xl": 24, "2xl": 32 }
+  },
+  "breakpoints": { "xs": 320, "s": 480, "m": 768, "l": 1024, "xl": 1366 },
+  "typography": { "family": "Roboto" },
+  "code": {
+    "framework": "angular",
+    "package": "@dds/angular",
+    "version": "3"
+  },
+  "sources": {
+    "storybook": "https://angular.delldesignsystem.com",
+    "docs": "https://www.delldesignsystem.com"
+  },
+  "tokens": {
+    "css": "tokens/tokens.css",
+    "names": "tokens/tokens.css-names.txt"
+  },
+  "tour": {
+    "pattern": "tour/frontend-pattern.md",
+    "patternName": "frontend-dds",
+    "indexSummary": "Componentes de @dds/angular + tokens --dds-*; ferramentas DDS por fase (design-builder → figma-to-code → figma-fidelity)."
+  }
+}

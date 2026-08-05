@@ -1,0 +1,5 @@
+{
+  "name": "agile-helper",
+  "version": "1.0.0",
+  "description": "Skills de apoio ao fluxo agile: quebra de User Stories em Subtasks, criacao de itens de QA (Epic/Story/AC/Test Cases) e abertura de Pull Requests seguindo o padrao do time."
+}

@@ -64,6 +64,18 @@ Load `${CLAUDE_PLUGIN_ROOT}/profiles/<profile>/profile.json`. Throughout this sk
    tokens imported. Confirm before binding `profile.tokenPrefix` variables.
 4. Read the project's local design-system knowledge if present (e.g. a Tour pattern in
    `.agent/patterns/`); otherwise rely on the profile's bundled allowlist + the live Storybook.
+5. **Theme/mode is pinned in the consuming repo.** Many design systems resolve semantic tokens via
+   `prefers-color-scheme` when no explicit theme class is set (e.g. `@dds/angular` on `--dds-*`
+   tokens). Figma captures are single-mode (usually light). If the app's root (`index.html` /
+   root layout) has no theme-locking class/attribute, the exact same token-correct code renders
+   with completely different resolved colors depending on the OS/browser color scheme — a false
+   "it doesn't match the design" that isn't actually a code bug. Check once per project
+   (skip if already confirmed this session):
+   - Look for a theme class/attribute on the document root (per profile — Dell: `dds--light-mode`
+     / `dds--dark-mode` on `<html>`/`<body>`).
+   - If missing → **stop and ask the dev** whether to pin a theme (and which one) before
+     scaffolding, rather than silently scaffolding on top of an unpinned theme and letting the
+     mismatch surface later as a "fidelity bug".
 
 ## Procedure — locked workflow
 
@@ -108,19 +120,58 @@ Generate the component honoring the profile's coding rules — no exceptions:
   structure + design-system wiring, not behavior.
 - Confirm exact selector/inputs/outputs against the profile's **Storybook**
   (`profile.sources.storybook`) — this skill does not freeze the component API.
+- **Match the Figma auto-layout's box behavior, not just its tokens.** When a Figma auto-layout
+  frame's children are scaffolded as native block elements (`h1`, `p`, headings/paragraphs bound
+  to design-system typography utility classes) inside a flex/grid container:
+  - Design-system typography utility classes (e.g. `dds__heading--2`, `dds__subtitle--1`) commonly
+    set only `font-*`/`line-height` — they do **not** reset the browser's default element margins.
+    Explicitly zero the margin on those elements (or on the container's children generically) so
+    the container's own `gap`/token-bound spacing is the only source of vertical spacing. Otherwise
+    UA margins stack on top of the intended gap and the block ends up visibly taller than the
+    design, even though every spacing token used is individually correct.
+  - Set the container's cross-axis alignment (`align-items`) to match the Figma auto-layout's
+    alignment (e.g. "Hug contents" / left-aligned → `align-items: flex-start`) instead of leaving
+    the flexbox default (`stretch`). A `stretch` default silently expands non-full-width children
+    (e.g. a tag/chip/badge with no intrinsic width) to fill the container's cross-axis, distorting
+    it into a full-width bar that reads as a completely different visual result even though its own
+    tokens (color, padding, radius) are all correct.
+- **Cross-check the resolved component-variant token against the Figma capture.** After picking a
+  design-system component variant via Code Connect (step 2), diff the variant's actual bound
+  tokens (readable from the installed package's compiled CSS/source, e.g. which
+  `--<prefix>-color-*` variable a `--variant` class hardcodes) against the tokens `get_variable_defs`
+  returned for that exact Figma instance. If they resolve to different tokens (e.g. the design uses
+  a `-pale` border token but the shipped component's variant hardcodes a `-subtle` one), that is a
+  **design-system/library drift**, not a scaffolding mistake — do not invent an inline override to
+  force pixel-match. Surface it to the dev as a named gap (which token differs, in which variant)
+  and let them decide: accept the library's shipped value as source of truth, or file it as a
+  design-system defect upstream. This mirrors `design-builder`'s "stop and report the gap" rule,
+  applied at code-generation time instead of design time.
 
 In a Tour flow: scaffold only what the **approved plan** covers. If the design implies work
 outside the plan, stop and ask for re-approval of that slice (Tour's rule).
 
 ### 4. HAND OFF to verification
 
-After scaffolding, tell the dev the next step is `figma-fidelity`:
-- **CAPTURE** a snapshot when the design is stable, and
-- **VERIFY** (headless) in REVIEW / the quality-gate.
+Immediately after scaffolding, **invoke `figma-fidelity` in VERIFY mode automatically** against
+the just-scaffolded code — don't wait for the dev to ask or for the quality-gate/REVIEW to run it.
+Do this without asking for confirmation first; VERIFY is headless and read-only (no Figma file
+state, no commit), so there's nothing to gate.
+
+- If VERIFY comes back **pass** → say so briefly and move on; no further action needed.
+- If VERIFY comes back **fail** → fix the flagged token/geometry divergence in the scaffold before
+  considering this step done (this closes the loop this skill's own anti-patterns and hard rules
+  set up — e.g. an unreset margin or a `stretch`-ed child, see step 3) — then re-run VERIFY once.
+  Don't loop indefinitely on a genuine design-system/library drift (see step 3's variant-drift
+  case): surface that to the dev instead of retrying.
+- If VERIFY reports **"no reference design"** (no snapshot yet) → that's expected for a first
+  scaffold. Tell the dev the next step is `figma-fidelity` **CAPTURE** once the design is stable —
+  CAPTURE stays dev-assisted and requires their confirmation before writing/committing the
+  snapshot (it needs the Figma file open/selected, and shouldn't freeze a design that might still
+  change). Don't run CAPTURE automatically or without that confirmation.
 
 `figma-to-code` gets the code design-system-correct at authoring time; `figma-fidelity` proves it
-stayed that way. A deterministic linter (e.g. `stylelint`) still blocks literals — this skill
-complements it.
+stayed that way — automatically for VERIFY, dev-gated for CAPTURE. A deterministic linter (e.g.
+`stylelint`) still blocks literals — this skill complements it.
 
 ## Hard rules
 
@@ -130,6 +181,8 @@ complements it.
 - Never recreate a component the design system already provides.
 - Don't write implementation code ahead of an approved plan (Tour: IMPLEMENT follows APPROVAL).
 - Don't freeze/guess the component API here — confirm it in the Storybook.
+- Always run `figma-fidelity` VERIFY right after scaffolding — don't leave it for the dev to
+  remember or for REVIEW to catch. Never auto-run `figma-fidelity` CAPTURE — that stays dev-gated.
 
 ## Anti-patterns
 
@@ -141,6 +194,16 @@ complements it.
   props/variants.
 - ❌ Writing business logic as if it were part of the scaffold.
 - ❌ Treating the scaffold as verified — verification is `figma-fidelity`'s job.
+- ❌ Scaffolding UI on a project with no pinned theme/mode and assuming the rendered result will
+  match a single-mode Figma capture.
+- ❌ Leaving native heading/paragraph elements with their browser default margins when the parent
+  auto-layout already carries the intended spacing via `gap`.
+- ❌ Leaving a flex/grid container's children on the default `stretch` alignment when the Figma
+  auto-layout hugs its content — an unstyled child (chip, badge, icon button) will silently expand
+  to fill the axis.
+- ❌ Silently overriding a design-system component's internal token to force a pixel-match with
+  Figma when the shipped variant resolves a different token — that's a drift to report, not patch
+  around invisibly.
 
 ## Dependencies
 
@@ -167,6 +230,12 @@ complements it.
 3. A token in the node that's **not** in the allowlist → flag it instead of emitting it.
 4. Run `figma-fidelity` VERIFY on the scaffolded code → should pass (proves the hand-off closes
    the loop).
+5. Render the scaffold with the project's theme unpinned (default OS light) and again forced dark
+   (or vice versa) → the rendered result must only change if the project intentionally supports
+   both modes; an unpinned project must be caught at prerequisite step 5, not discovered here.
+6. A container whose Figma auto-layout hugs its content, with a non-full-width child (tag/badge) →
+   the scaffolded child must render at its intrinsic width, not stretched to the container's
+   cross-axis.
 
 ## Recommended model
 

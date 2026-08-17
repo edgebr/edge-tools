@@ -1,20 +1,28 @@
 ---
 name: figma-fidelity
-description: "Verifies design-system token conformance (color, spacing, typography) between the implemented UI and the Figma design. Two modes: CAPTURE (dev-assisted, produces a committed snapshot of the design) and VERIFY (headless, compares the code against the snapshot — runs in the quality-gate/review). Token prefix and values come from the active profile. It is NOT pixel-perfect: it's token conformance."
+description: "Verifies design-system token conformance (color, spacing, typography) AND rendered box geometry (position/size of key elements) between the implemented UI and the Figma design. Two modes: CAPTURE (dev-assisted, produces a committed snapshot of the design's tokens and layout boxes) and VERIFY (headless, compares the code against the snapshot — runs in the quality-gate/review). Token prefix and values come from the active profile. It is NOT pixel-perfect image diffing: it's token conformance plus box-level layout conformance."
 preferred_model: sonnet
 ---
 
 # figma-fidelity
 
 Checks whether the implementation uses the **same design-system tokens** as the Figma design
-(color, spacing, typography). It works at the level of **token/value conformance**, not pixel
-comparison.
+(color, spacing, typography), **and** whether the rendered layout occupies the **same boxes**
+(position/size of each mapped element) that the Figma auto-layout produces. It works at the level
+of **token/value conformance plus box-geometry conformance** — not full pixel/image comparison.
+
+Token conformance alone is not sufficient: a component can use every correct token and still
+render with a visibly different layout, because CSS box-model defaults (flex `stretch`, native
+element margins, etc.) sit *between* "tokens are bound correctly" and "the box ends up the right
+size and place". Catching that requires comparing actual rendered geometry, not just which
+variables were referenced — see CAPTURE/VERIFY step on box geometry below.
 
 Operating model (snapshot):
 - **CAPTURE** (occasional, dev-assisted): when a screen's design stabilizes, extract from Figma
-  the tokens it uses and write a **committed snapshot**.
-- **VERIFY** (recurring, headless): compare the component's style against the snapshot. This is
-  what runs in the quality-gate/review — no Figma open.
+  the tokens it uses **and** the bounding box (x/y/width/height) of each mapped element, and write
+  a **committed snapshot**.
+- **VERIFY** (recurring, headless): compare the component's style **and** its rendered bounding
+  boxes against the snapshot. This is what runs in the quality-gate/review — no Figma open.
 
 ## Active profile (resolve before anything)
 
@@ -45,15 +53,33 @@ profile's token file or the snapshot.
 - As a linter substitute: a deterministic linter already blocks literals; this skill checks
   **adherence to the design**.
 
+## Before comparing anything: confirm the runtime mode/theme is pinned
+
+Skip straight to CAPTURE/VERIFY only after confirming the consuming repo pins a theme (see
+`figma-to-code`'s prerequisite step 5 — per profile, e.g. `dds--light-mode` on the document root
+for Dell). If it doesn't, **both modes are "correct" simultaneously** and any comparison you run
+depends on whichever mode the runtime happens to resolve to (OS/browser preference) — a mismatch
+found this way may be a real bug, or it may just mean you ran VERIFY under the mode the snapshot
+wasn't captured in. If the theme isn't pinned:
+- Don't report a fail based on the observed mismatch alone — first check whether forcing the
+  snapshot's captured mode makes the comparison pass.
+- Flag the missing pin itself as a project-level gap (separately from any component-level finding)
+  so it gets fixed once, not rediscovered per screen.
+
 ## Procedure — CAPTURE (dev-assisted)
 
 1. The dev provides the screen's Figma **node URL** (from the activity's design link) and has the
    file open/selected.
 2. Extract the tokens the node uses via the Figma MCP (`get_variable_defs`) → a `{ css, value }`
    set.
-3. Normalize against the profile's token file (`profile.tokens.css`): resolve alias → value;
+3. Extract the **bounding box of each mapped element** via `get_metadata` on the same node (x, y,
+   width, height, in the node's local coordinate space — i.e. relative to the top-level frame
+   being captured, not absolute canvas coordinates). Capture this for every element that has its
+   own code counterpart (the container, and each direct child worth asserting on) — not just leaf
+   text nodes.
+4. Normalize tokens against the profile's token file (`profile.tokens.css`): resolve alias → value;
    record light/dark mode when applicable.
-4. Write the snapshot **co-located** with the component: `<component>.design.json` (committed),
+5. Write the snapshot **co-located** with the component: `<component>.design.json` (committed),
    in the format:
    ```json
    {
@@ -62,10 +88,17 @@ profile's token file or the snapshot.
      "tokens": [
        { "css": "<prefix>color-text-primary", "type": "COLOR", "value": {"light":"#1d2c3b","dark":"#ebf1f6"} },
        { "css": "<prefix>spacing-lg", "type": "FLOAT", "value": 16 }
+     ],
+     "boxes": [
+       { "selector": ".admin-availability__header", "x": 0, "y": 0, "w": 1366, "h": 188 },
+       { "selector": ".admin-availability__header [ddsTag]", "x": 48, "y": 32, "w": 102, "h": 32 }
      ]
    }
    ```
-5. Present to the dev what was captured for **validation** before committing (is the design
+   `selector` is the CSS selector in the consuming repo that identifies the equivalent element —
+   record it while the mapping is fresh (right after `figma-to-code` or manual implementation),
+   don't reverse-engineer it later during VERIFY.
+6. Present to the dev what was captured for **validation** before committing (is the design
    stable?).
 
 ## Procedure — VERIFY (headless)
@@ -81,16 +114,37 @@ profile's token file or the snapshot.
      block on its own).
    - Resolve values via `profile.tokens.css` and respect **mode** (don't flag a difference that is
      only light vs dark).
-4. **Verdict:** `pass` if there is no blocking divergence; otherwise `fail` with the list.
-5. **Report:** per token — expected (design) vs found (code), with the file/line when possible.
+4. **Box geometry:** for each `boxes` entry in the snapshot, render the component (or use an
+   already-running dev server) and read the real rendered box for that `selector`
+   (`getBoundingClientRect()`, e.g. via the project's browser tooling). Compare against the
+   snapshot's `x/y/w/h` with a small tolerance (a few px, for subpixel/font-rendering rounding —
+   not for real drift):
+   - A rendered box outside tolerance on **width or height** → **blocking divergence**. This is
+     what catches a chip/badge stretched to fill its container (missing `align-items`), or a block
+     taller than expected (unreset native margins stacking on top of a flex `gap`) — cases where
+     every individual token is correct but the box model isn't.
+   - A rendered box outside tolerance on **position only** (correct size, shifted x/y), where the
+     parent chain itself has no divergence → usually downstream of a sibling's size divergence
+     above it; report it but don't double-count it as a separate root cause.
+   - Skip this step (report "no geometry reference", not a false pass) if the snapshot has no
+     `boxes`, or if the theme/mode isn't pinned (see the mode-pinning check above) and forcing the
+     snapshot's mode isn't feasible in this run.
+5. **Verdict:** `pass` if there is no blocking divergence (token or geometry); otherwise `fail`
+   with the list.
+6. **Report:** per token — expected (design) vs found (code); per box — expected vs rendered
+   x/y/w/h and which CSS property is the likely cause (missing `align-items`, unreset margin,
+   wrong `width`, etc.) — with the file/line when possible.
 
 ## Scope
 
-- **Checks:** color, spacing, typography (design-system tokens).
-- **Does NOT check (v1):** layout arrangement (flex/grid), positioning, pixel-perfect, dynamic
-  content.
-- **v2 (future):** per-property binding (via `get_design_context`), and checking the rendered
-  **computed value** (Playwright) against the design.
+- **Checks:** color, spacing, typography (design-system tokens); rendered box geometry
+  (position/size) of elements recorded in the snapshot's `boxes`.
+- **Does NOT check:** pixel/image-level comparison (font antialiasing, exact curve rendering,
+  gradients), dynamic content, layout arrangement beyond the boxes explicitly captured (e.g. it
+  won't notice a reordered child unless that child's own box is in `boxes`).
+- **v2 (future):** per-property binding (via `get_design_context`) for a fuller token↔property
+  trace, and full computed-style diffing (not just the box-affecting subset) via a headless
+  browser driver.
 
 ## Flow integration
 
@@ -102,27 +156,45 @@ profile's token file or the snapshot.
 ## Anti-patterns
 
 - ❌ Returning "conformant" with no snapshot. It must warn that there is **no reference design**.
-- ❌ Using screenshot/pixel-diff as a v1 criterion.
+- ❌ Using full screenshot/image-diff as a criterion — box geometry is compared via
+  `getBoundingClientRect()`-style numbers, not pixel images.
 - ❌ Freezing token values in the skill instead of resolving via `profile.tokens.css`/snapshot.
 - ❌ Capturing a snapshot and committing **without the dev confirming** the design is stable.
 - ❌ Treating "extra token in code" as an automatic error (it's a warning, not a block).
 - ❌ Flagging a divergence that is only a **mode** difference (light vs dark).
+- ❌ Declaring "conformant" from token checks alone when the snapshot has `boxes` recorded — a
+  token-only pass with an untested box divergence is a false pass (this is exactly the gap that
+  let a stretched chip and a doubled-height header through as "no divergence found").
+- ❌ Reporting a mode-driven mismatch as a component bug without first checking whether the
+  runtime's theme is pinned at all (see the mode-pinning check).
 
 ## Dependencies
 
-- **Figma MCP** — CAPTURE mode only.
+- **Figma MCP** — CAPTURE mode only (`get_variable_defs` for tokens, `get_metadata` for boxes).
 - **Profile (bundled, shared):** `${CLAUDE_PLUGIN_ROOT}/profiles/<profile>/tokens/` —
   `profile.tokens.css` (+ `profile.tokens.names`) to resolve alias→value offline. Same source as
   `design-builder`/`figma-to-code`.
 - Components styled in SCSS/CSS using `profile.tokenPrefix` variables (in the consuming repo).
+- **A running instance of the component** (dev server, or the project's browser/preview tooling) —
+  VERIFY's box-geometry step needs a real rendered DOM to read `getBoundingClientRect()` from; it
+  can't be done from static source alone the way the token check can.
 
 ## How to validate the skill (evidence)
 
-1. Take a component + a design-system node; run CAPTURE → generate the `<comp>.design.json`.
-2. Run VERIFY on **clean** code → `pass`.
-3. Introduce a deliberate deviation (`#hex` literal or a swapped `spacing`) → VERIFY must **catch**
-   it and `fail`, pointing at the right token.
-4. Rename/remove the snapshot → VERIFY must **warn "no reference design"**, not pass.
+1. Take a component + a design-system node; run CAPTURE → generate the `<comp>.design.json` with
+   both `tokens` and `boxes`.
+2. Run VERIFY on **clean** code → `pass` (tokens and geometry both within tolerance).
+3. Introduce a deliberate token deviation (`#hex` literal or a swapped `spacing`) → VERIFY must
+   **catch** it and `fail`, pointing at the right token.
+4. Introduce a deliberate **geometry** deviation with all tokens still correct (e.g. remove
+   `align-items: flex-start` so a child stretches full-width, or remove a `margin: 0` reset so a
+   heading gains extra height) → VERIFY must **catch** it via the box comparison and `fail`,
+   naming the affected selector and the likely CSS cause — this is the case a token-only check
+   silently passes.
+5. Rename/remove the snapshot → VERIFY must **warn "no reference design"**, not pass.
+6. Run VERIFY under the mode opposite the snapshot's captured mode, on an unpinned project →
+   VERIFY must flag the missing theme pin rather than reporting the mode-driven color/box diffs as
+   component-level fidelity bugs.
 
 ## Recommended model
 

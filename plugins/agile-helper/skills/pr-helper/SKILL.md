@@ -99,11 +99,22 @@ organized in Step 2 — to understand what was done: don't invent functionality 
 commits/diff. If the diff is too large, summarize by area/file instead of trying to process
 everything literally.
 
+Also check whether session notes (e.g. `SESSION_STATE.md`) or the conversation itself recorded a
+divergence between design/spec and the ticket's acceptance criteria that got resolved during
+implementation — carry that forward into Additional Notes in Step 5.
+
 ### Step 4 — Ask for the base branch (always, don't assume)
 
 Ask which branch the PR will be opened against (e.g., `main`, `develop`, or the parent feature
 branch, in the case of a subtask). Don't reuse an answer from an earlier PR in the same
 conversation — each activity can target a different base.
+
+If the activity is a `subtask`, check first whether a sibling subtask from the same feature is
+still unmerged **and** touches files this activity also edits/builds on. If so, proactively
+suggest that sibling's branch as the base instead of the feature branch — say why (avoids a merge
+conflict with work that isn't integrated yet) — and let the dev confirm or override. Don't just
+ask the base branch question in a vacuum when this situation is detectable from Jira/branch
+state.
 
 ### Step 5 — Build the description in the template
 
@@ -135,11 +146,20 @@ Use **exactly** this template — don't change the structure, section headers, o
 <!--Any additional information relevant to reviewers -->
 ```
 
+Language: the template's own structure (section headers, checklist items, HTML comments) stays
+in English exactly as shown above — it's the team's fixed format. The content you write into
+each section (title wording, PR Purpose, Additional Notes) follows the language the session is
+currently running in, unless the team's policy says otherwise.
+
 Fill in each section like this:
 
 - **Title (H1):** Jira code extracted from the branch (or asked for) + a descriptive, short
   title focused on what the PR actually delivers — draft it from the commits, but it's just a
-  draft for the dev to review, not the final version.
+  draft for the dev to review, not the final version. If this PR depends on another one that
+  isn't merged yet (e.g. the base branch from Step 4 is a sibling subtask's branch, not the
+  feature/main branch), append `(Depends on <JIRA-CODE>)` — reference the **Jira ticket code** of
+  the dependency, never the GitHub PR number (numbers shift if PRs get closed/reopened/reordered;
+  the ticket code doesn't).
 - **Change Type:** check the box (`- [x]`) that matches the branch prefix (feature → Feature,
   fix → Bugfix, refactor → Refactor, docs → Documentation; task/subtask/other require looking at
   the diff's actual content to decide Feature/Bugfix/Refactor/Other, since they don't map 1:1).
@@ -151,10 +171,18 @@ Fill in each section like this:
   don't check them optimistically. Tell the dev which ones were left without automatic
   verification.
 - **Test Evidence:** if you ran something (lint, tests, coverage) during this process, paste the
-  result here. Otherwise, leave the comment placeholder for the dev to fill in by hand.
+  result here. Otherwise, leave the comment placeholder for the dev to fill in by hand. If you
+  have a screenshot/log that would belong here but can't attach it yourself (no attachment API),
+  don't write that limitation into the PR body (e.g. "screenshot not attached, add manually") —
+  it stays visible to anyone who reads the PR even if never completed. Write the section as
+  complete without the image, and mention the limitation to the dev only in chat, so they can
+  decide whether to attach it separately.
 - **Additional Notes:** only fill in when there's something relevant and verifiable (e.g., the
   branch is a subtask that will be merged directly into a feature, with no split into tasks) —
-  don't invent process context you have no way of confirming from Jira/the branch.
+  don't invent process context you have no way of confirming from Jira/the branch. If a
+  divergence between the design/spec and the ticket's acceptance criteria was resolved during
+  implementation (whichever side prevailed and why), include it here as its own bullet — don't
+  leave it only in local session notes; it needs to be visible to whoever reviews the PR.
 
 ### Step 6 — Review gate (mandatory, never skipped)
 
@@ -168,10 +196,17 @@ Only move to Step 7 with explicit confirmation.
 ### Step 7 — Push and open the PR
 
 1. `git push -u origin <current-branch>`.
-2. Open the PR with GitHub CLI:
+2. Open the PR with GitHub CLI, always setting the dev as assignee (`--assignee @me`, the
+   authenticated `gh` user — the person doing the work is the one opening the PR):
    ```
-   gh pr create --base <base-branch> --title "[JIRA-CODE] Title" --body "<template content>"
+   gh pr create --base <base-branch> --title "[JIRA-CODE] Title" --body "<template content>" --assignee @me
    ```
+   If the base branch from Step 4 is another unmerged branch (the case that produced the
+   `(Depends on <JIRA-CODE>)` title suffix in Step 5), add `--draft` — the PR opens as a **draft**
+   until its dependency is merged. Don't open it ready-for-review while it's based on unmerged
+   work. Tell the dev it's draft-because-of-the-dependency, and that once the dependency PR
+   merges, taking it out of draft (`gh pr ready`) is a manual step for them — don't do it
+   yourself as part of this flow.
 3. Return the created PR's link to the dev.
 
 If `gh` isn't installed/authenticated, say so and offer the alternative: just deliver the ready
@@ -188,6 +223,8 @@ markdown description for the dev to paste manually into the GitHub interface.
 | Diff too large to process in full | Summarizes by area/file instead of trying to reproduce everything literally |
 | Ambiguous change type (branch is `task`/`subtask`/`other`, or mixed diff) | Asks instead of checking a box by guessing |
 | Nothing to commit/push (clean working tree, no new commits relative to base) | Says so before trying to proceed with the PR |
+| Subtask edits/builds on files from a sibling subtask that's still unmerged | Suggest that sibling's branch as base (Step 4) instead of the feature branch, and add `(Depends on <JIRA-CODE>)` to the title (Step 5) |
+| PR's base branch is itself unmerged (the `Depends on` case) | Open the PR with `--draft` (Step 7); leaving draft is a manual step for the dev once the dependency merges |
 
 ## Anti-patterns
 
@@ -201,3 +238,10 @@ markdown description for the dev to paste manually into the GitHub interface.
   content
 - Don't invent Purpose, Additional Notes, or Test Evidence that doesn't come from the diff/
   commits or from something you actually ran
+- Don't mention inside the PR body that a screenshot/log/attachment is missing or needs to be
+  added manually — write the section as complete and flag the gap to the dev only in chat
+- Don't append a `(Depends on ...)` title suffix referencing a GitHub PR number — always
+  reference the dependency's Jira ticket code
+- Don't open a PR ready-for-review when its base branch is itself unmerged — open it as
+  `--draft` and leave taking it out of draft to the dev, once the dependency merges
+- Don't open a PR without setting the dev as assignee (`--assignee @me`)

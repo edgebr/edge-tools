@@ -212,6 +212,24 @@ Only move to Step 7 with explicit confirmation.
 If `gh` isn't installed/authenticated, say so and offer the alternative: just deliver the ready
 markdown description for the dev to paste manually into the GitHub interface.
 
+### Step 8 — Optional: register as a GitHub Stack (dependent PRs only)
+
+Only relevant for the `Depends on <JIRA-CODE>` / draft case from Step 7 (this PR's base branch is
+itself unmerged). GitHub Stacked PRs (public preview) natively track a chain of PRs, giving a
+stack view in the PR UI and cascading rebase when the bottom of the chain merges — on top of,
+not instead of, the manual `(Depends on <JIRA-CODE>)` title suffix and `--draft` handling above
+(GitHub Stacks doesn't know about Jira ticket codes, so those stay regardless).
+
+This is **optional and off by default** — ask the dev if they want this PR tracked as a stack;
+don't do it unprompted.
+
+If they say yes:
+1. Check whether the `gh-stack` extension is installed (`gh extension list`). If it isn't, tell
+   the dev and ask before installing it (`gh extension install github/gh-stack`) — it's a global
+   CLI extension, not something scoped to this repo/project, so don't install it silently.
+2. Run `gh stack add` to register the current branch in the chain (`gh stack init` instead, if
+   this is the first PR of the chain), then `gh stack submit` to push and link it as a stack.
+
 ## Edge Cases
 
 | Case | Behavior |
@@ -225,6 +243,7 @@ markdown description for the dev to paste manually into the GitHub interface.
 | Nothing to commit/push (clean working tree, no new commits relative to base) | Says so before trying to proceed with the PR |
 | Subtask edits/builds on files from a sibling subtask that's still unmerged | Suggest that sibling's branch as base (Step 4) instead of the feature branch, and add `(Depends on <JIRA-CODE>)` to the title (Step 5) |
 | PR's base branch is itself unmerged (the `Depends on` case) | Open the PR with `--draft` (Step 7); leaving draft is a manual step for the dev once the dependency merges |
+| Dev wants a dependent PR tracked as a GitHub Stack | Optional Step 8 — check/install the `gh-stack` extension, `gh stack add`/`gh stack submit`; never replaces the `Depends on`/`--draft` handling |
 
 ## Anti-patterns
 
@@ -245,3 +264,5 @@ markdown description for the dev to paste manually into the GitHub interface.
 - Don't open a PR ready-for-review when its base branch is itself unmerged — open it as
   `--draft` and leave taking it out of draft to the dev, once the dependency merges
 - Don't open a PR without setting the dev as assignee (`--assignee @me`)
+- Don't register a PR as a GitHub Stack, or install the `gh-stack` extension, without the dev
+  opting in — Step 8 is optional and off by default

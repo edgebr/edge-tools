@@ -76,7 +76,17 @@ wasn't captured in. If the theme isn't pinned:
    width, height, in the node's local coordinate space — i.e. relative to the top-level frame
    being captured, not absolute canvas coordinates). Capture this for every element that has its
    own code counterpart (the container, and each direct child worth asserting on) — not just leaf
-   text nodes.
+   text nodes. **Always record `x`/`y` alongside `w`/`h` when the element's placement relative to
+   its siblings is part of the design intent** (e.g. a button group meant to sit right-aligned in
+   a footer, not just sized correctly) — recording only `w`/`h` lets a left-vs-right or
+   top-vs-bottom placement bug through even when the exploratory measurement already showed the
+   real position, simply because that position was never written into the comparison point.
+   For a **text-bearing element inside a container whose own size the library pins independent of
+   content** (e.g. a header row whose `flex-basis` matches a sibling icon button, so it stays the
+   same height whether the text is 16px or 24px) — also record the expected `fontSize`,
+   `fontWeight`, and `lineHeight` on that box entry (see schema below) and note in a comment which
+   container this applies to. The outer box will pass geometry comparison either way; only a
+   computed-style check on the text node itself catches a typography regression there.
 4. Normalize tokens against the profile's token file (`profile.tokens.css`): resolve alias → value;
    record light/dark mode when applicable.
 5. Write the snapshot **co-located** with the component: `<component>.design.json` (committed),
@@ -91,13 +101,22 @@ wasn't captured in. If the theme isn't pinned:
      ],
      "boxes": [
        { "selector": ".admin-availability__header", "x": 0, "y": 0, "w": 1366, "h": 188 },
-       { "selector": ".admin-availability__header [ddsTag]", "x": 48, "y": 32, "w": 102, "h": 32 }
+       { "selector": ".admin-availability__header [ddsTag]", "x": 48, "y": 32, "w": 102, "h": 32 },
+       {
+         "selector": "dds-modal-header h2",
+         "x": 24, "y": 24, "w": 704, "h": 32,
+         "fontSize": 24, "fontWeight": 400, "lineHeight": 32,
+         "note": "Container height is pinned by the library to match the close button (32px) regardless of the text's font-size — box geometry alone can't catch a typography regression here; fontSize/fontWeight/lineHeight are compared via getComputedStyle in VERIFY step 4b."
+       }
      ]
    }
    ```
    `selector` is the CSS selector in the consuming repo that identifies the equivalent element —
    record it while the mapping is fresh (right after `figma-to-code` or manual implementation),
-   don't reverse-engineer it later during VERIFY.
+   don't reverse-engineer it later during VERIFY. `fontSize`/`fontWeight`/`lineHeight` are optional
+   — add them only for a text-bearing box whose container size doesn't reflect its own typography
+   (see the note above); most `boxes` entries don't need them, since a wrong font-size on unpinned
+   content usually already shows up as a wrong `h`.
 6. Present to the dev what was captured for **validation** before committing (is the design
    stable?).
 
@@ -129,16 +148,30 @@ wasn't captured in. If the theme isn't pinned:
    - Skip this step (report "no geometry reference", not a false pass) if the snapshot has no
      `boxes`, or if the theme/mode isn't pinned (see the mode-pinning check above) and forcing the
      snapshot's mode isn't feasible in this run.
-5. **Verdict:** `pass` if there is no blocking divergence (token or geometry); otherwise `fail`
-   with the list.
+   - A `boxes` entry that records `x`/`y` and the rendered element sits at a **different position
+     than expected while its own `w`/`h` are correct** → **blocking divergence**, even if nothing
+     else in the box looks wrong. This is what catches a right-aligned button group rendering
+     flush-left (or vice versa) — the group's own size can be exactly right while its position
+     relative to its container is not; don't skip comparing `x`/`y` just because `w`/`h` passed.
+4b. **Typography-on-fixed-container check:** for any `boxes` entry that also records `fontSize`/
+    `fontWeight`/`lineHeight`, read the real computed style of that exact selector
+    (`getComputedStyle(el).fontSize` etc.) and compare against those values, **independently of
+    the box-geometry comparison**. A container whose own size the library pins to a sibling (e.g.
+    a header row sized to match its close button) will pass the box check at any font-size — this
+    step exists specifically to catch what that check structurally cannot.
+5. **Verdict:** `pass` if there is no blocking divergence (token, geometry, or typography);
+   otherwise `fail` with the list.
 6. **Report:** per token — expected (design) vs found (code); per box — expected vs rendered
-   x/y/w/h and which CSS property is the likely cause (missing `align-items`, unreset margin,
-   wrong `width`, etc.) — with the file/line when possible.
+   x/y/w/h and which CSS property is the likely cause (missing `align-items`/`justify-content`,
+   unreset margin, wrong `width`, etc.); per typography check — expected vs computed
+   fontSize/fontWeight/lineHeight — with the file/line when possible.
 
 ## Scope
 
 - **Checks:** color, spacing, typography (design-system tokens); rendered box geometry
-  (position/size) of elements recorded in the snapshot's `boxes`.
+  (position **and** size) of elements recorded in the snapshot's `boxes`; computed
+  fontSize/fontWeight/lineHeight of any `boxes` entry that records them (for text inside a
+  library-pinned container, where box geometry alone can't reveal a typography regression).
 - **Does NOT check:** pixel/image-level comparison (font antialiasing, exact curve rendering,
   gradients), dynamic content, layout arrangement beyond the boxes explicitly captured (e.g. it
   won't notice a reordered child unless that child's own box is in `boxes`).
@@ -167,6 +200,14 @@ wasn't captured in. If the theme isn't pinned:
   let a stretched chip and a doubled-height header through as "no divergence found").
 - ❌ Reporting a mode-driven mismatch as a component bug without first checking whether the
   runtime's theme is pinned at all (see the mode-pinning check).
+- ❌ Recording only `w`/`h` for an element whose alignment relative to its siblings is part of
+  the design intent — this silently drops the one comparison point that would have caught a
+  left-vs-right (or top-vs-bottom) placement bug, even when the exploratory measurement already
+  had the real `x`/`y` in hand. If you measured the position, write it into the snapshot.
+- ❌ Trusting a container's box geometry as proof that its content's typography is correct when
+  the library pins that container's own size independent of content (e.g. `flex-basis` matched to
+  a sibling icon/button). The box passes at any font-size; only a computed-style check on the text
+  node itself (fontSize/fontWeight/lineHeight) catches a regression there.
 
 ## Dependencies
 
@@ -195,6 +236,17 @@ wasn't captured in. If the theme isn't pinned:
 6. Run VERIFY under the mode opposite the snapshot's captured mode, on an unpinned project →
    VERIFY must flag the missing theme pin rather than reporting the mode-driven color/box diffs as
    component-level fidelity bugs.
+7. Take an element meant to be right-aligned in its container (all tokens correct, box `w`/`h`
+   correct) and flip its CSS to `justify-content: flex-start` (or drop the alignment rule
+   entirely) → VERIFY must **catch** it via the `x` comparison and `fail`, naming the selector —
+   this is the case a `w`/`h`-only snapshot entry passes silently even though the position is
+   wrong.
+8. Take a text element inside a container whose size the library pins independent of content
+   (e.g. a header row sized to match a sibling icon button), and remove its heading class so it
+   renders as plain body text instead of the intended larger/bolder style → VERIFY must **catch**
+   it via the fontSize/fontWeight computed-style check (step 4b) and `fail`, even though the
+   container's own box stays within tolerance — this is the case a geometry-only check on the
+   container passes silently.
 
 ## Recommended model
 
